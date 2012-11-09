@@ -105,5 +105,6 @@ module Throttling
 end
 
 require 'throttling/indifferent_access'
+require 'throttling/limit'
 require 'throttling/base'
 require "throttling/version"

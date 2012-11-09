@@ -34,21 +34,16 @@ module Throttling
       return true if !Throttling.enabled? || check_value.nil?
 
       limits.each do |period_name, params|
-        period = params[:period].to_i
-        limit  = params[:limit].nil? ? nil : params[:limit].to_i
-        values = params[:values]
+        period = Limit.new(period_name, params)
 
-        raise ArgumentError, "Invalid or no 'period' parameter in the limits[#{action}][#{period_name}] config: #{limit.inspect}" if period < 1
-        raise ArgumentError, "Invalid 'limit' parameter in the limits[#{action}][#{period_name}] config: #{limit.inspect}" if !limit.nil? && limit < 0
-
-        key = hits_store_key(check_type, check_value, period_name, period)
+        key = hits_store_key(check_type, check_value, period.name, period.interval)
 
         # Retrieve current value
-        hits = Throttling.storage.fetch(key, :expires_in => hits_store_ttl(period), :raw => true) { '0' }.to_i
+        hits = Throttling.storage.fetch(key, :expires_in => period.ttl, :raw => true) { '0' }.to_i
 
-        if values
-          value = params[:default_value] || false
-          values.each do |value_name, value_params|
+        if period.values
+          value = period.default_value || false
+          period.values.each do |value_name, value_params|
             if hits < value_params[:limit].to_i
               value = value_params[:value] || value_params[:default_value] || false
               break
@@ -56,11 +51,17 @@ module Throttling
           end
         else
           # Over limit?
-          return false if !limit.nil? && hits >= limit
+          if !period.limit.nil? && hits >= period.limit
+            yield(period) if block_given?
+            return false
+          end
         end
 
         Throttling.storage.increment(key) if auto_increment
-        return value if values
+        if period.values
+          yield(period) if block_given? and value == true
+          return value
+        end
       end
 
       return true
@@ -70,10 +71,6 @@ module Throttling
 
     def hits_store_key(check_type, check_value, period_name, period_value)
       "throttle:#{action}:#{check_type}:#{check_value}:#{period_name}:#{Time.now.to_i / period_value}"
-    end
-
-    def hits_store_ttl(check_period)
-      check_period - Time.now.to_i % check_period
     end
   end
 end
